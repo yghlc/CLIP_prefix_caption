@@ -5,6 +5,7 @@
 # 
 # Disclaimer: the authors do not own any rights for the code or data.
 
+from optparse import OptionParser
 
 import clip
 import os
@@ -21,6 +22,8 @@ from tqdm import tqdm, trange
 import skimage.io as io
 import PIL.Image
 
+sys.path.insert(0, os.path.expanduser('~/codes/PycharmProjects/DeeplabforRS'))
+import basic_src.io_function as io_function
 
 N = type(None)
 V = np.array
@@ -246,52 +249,86 @@ def generate2(
 # else:
 #   downloader.download_file("1IdaBtMSvtyzF0ByVaBHtvM0JYSXRExRX", model_path)
 
+def generate_image_captions(image_path_list, CLIP_model_type="ViT-B/32", CLIP_model=None, is_gpu = True):
+
+    device = CUDA(0) if is_gpu else "cpu"
+    clip_model, preprocess = clip.load(CLIP_model_type, device=device, jit=False)
+
+    #TODO: to load trained CLIP model
+    if CLIP_model is not None:
+        pass
+
+    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
 
-is_gpu = True #@param {type:"boolean"}  
+    prefix_length = 10
+    model = ClipCaptionModel(prefix_length)
+    model.load_state_dict(torch.load(model_path, map_location=CPU))
+    model = model.eval()
+    # device = CUDA(0) if is_gpu else "cpu"
+    model = model.to(device)
 
 
-device = CUDA(0) if is_gpu else "cpu"
-clip_model, preprocess = clip.load("ViT-B/32", device=device, jit=False)
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    # what is this for?
+    use_beam_search = False
+
+
+    with torch.no_grad():
+        # if type(model) is ClipCaptionE2E:
+        #     prefix_embed = model.forward_image(image)
+        # else:
+
+        for idx, image_path in enumerate(image_path_list):
+            print(f' {idx+1}/{len(image_path_list)}, generating caption for {os.path.basename(image_path)}')
+            image = io.imread(image_path)
+            pil_image = PIL.Image.fromarray(image)
+            image = preprocess(pil_image).unsqueeze(0).to(device)
+
+            prefix = clip_model.encode_image(image).to(device, dtype=torch.float32)
+            prefix_embed = model.clip_project(prefix).reshape(1, prefix_length, -1)
+
+            if use_beam_search:
+                generated_text_prefix = generate_beam(model, tokenizer, embed=prefix_embed)[0]
+            else:
+                generated_text_prefix = generate2(model, tokenizer, embed=prefix_embed)
+
+            print('\n')
+            print(generated_text_prefix)
+
+def main(options, args):
+    image_path_list = []
+    if args[0].endswith(".txt"):
+        # read file name from the txt file
+        image_path_list = io_function.read_list_from_txt(args[0])
+    if os.path.isfile(args[0]):
+        image_path_list.append(args[0])
+    elif os.path.isdir(args[0]):
+        # read files name from a folder
+        image_path_list = io_function.get_file_list_by_pattern(args[0], '*.tif')
+    else:
+        raise IOError(f'Cannot recognize the input: {args[0]}')
+
+    generate_image_captions(image_path_list)
 
 
 
-prefix_length = 10
+if __name__ == '__main__':
+    usage = "usage: %prog [options] image_path or image_folder or image_list.txt"
+    parser = OptionParser(usage=usage, version="1.0 2025-7-1")
+    parser.description = 'Introduction: generate image captions  '
 
-model = ClipCaptionModel(prefix_length)
+    parser.add_option("-s", "--trained_model",
+                      action="store", dest="trained_model",
+                      help="the trained model")
 
-model.load_state_dict(torch.load(model_path, map_location=CPU)) 
-
-model = model.eval() 
-device = CUDA(0) if is_gpu else "cpu"
-model = model.to(device)
-
-
-
-
-#@title Inference
-use_beam_search = False
-
-UPLOADED_FILE = os.path.join("Images","COCO_val2014_000000354533.jpg")
-
-image = io.imread(UPLOADED_FILE)
-pil_image = PIL.Image.fromarray(image)
+    parser.add_option("-s", "--trained_clip_model",
+                      action="store", dest="trained_clip_model",
+                      help="the trained CLIP model")
 
 
-image = preprocess(pil_image).unsqueeze(0).to(device)
-with torch.no_grad():
-    # if type(model) is ClipCaptionE2E:
-    #     prefix_embed = model.forward_image(image)
-    # else:
-    prefix = clip_model.encode_image(image).to(device, dtype=torch.float32)
-    prefix_embed = model.clip_project(prefix).reshape(1, prefix_length, -1)
-if use_beam_search:
-    generated_text_prefix = generate_beam(model, tokenizer, embed=prefix_embed)[0]
-else:
-    generated_text_prefix = generate2(model, tokenizer, embed=prefix_embed)
+    (options, args) = parser.parse_args()
+    if len(sys.argv) < 2 or len(args) < 1:
+        parser.print_help()
+        sys.exit(2)
 
-
-print('\n')
-print(generated_text_prefix)
-
+    main(options, args)

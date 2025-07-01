@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+from optparse import OptionParser
 
 import clip
 import os
@@ -19,7 +20,8 @@ import PIL.Image
 from IPython.display import Image 
 from enum import Enum
 
-
+sys.path.insert(0, os.path.expanduser('~/codes/PycharmProjects/DeeplabforRS'))
+import basic_src.io_function as io_function
 
 N = type(None)
 V = np.array
@@ -368,65 +370,81 @@ def generate2(
 
 
 
-# pretrained_model = 'COCO' 
-
-# downloader.download_file("1GYPToCqFREwi285wPLhuVExlz7DDUDfJ", model_path)
+def generate_image_captions_transformer(image_path_list, CLIP_model_type="RN50x4", CLIP_model=None, is_gpu = True):
 
 
+    device = CUDA(0) if is_gpu else "cpu"
+    clip_model, preprocess = clip.load(CLIP_model_type, device=device, jit=False)
 
-is_gpu = True #@param {type:"boolean"}  
-
-
-#@title CLIP model + GPT2 tokenizer
-
-device = CUDA(0) if is_gpu else "cpu"
-clip_model, preprocess = clip.load("RN50x4", device=device, jit=False)
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
 
-prefix_length = 40
+    prefix_length = 40
+    model = ClipCaptionPrefix(prefix_length, clip_length=40, prefix_size=640,
+                                      num_layers=8, mapping_type='transformer')
+    model.load_state_dict(torch.load(model_path, map_location=CPU))
+    model = model.eval()
+    model = model.to(device)
 
-model = ClipCaptionPrefix(prefix_length, clip_length=40, prefix_size=640,
-                                  num_layers=8, mapping_type='transformer')
-model.load_state_dict(torch.load(model_path, map_location=CPU)) 
+    #@title Inference
+    use_beam_search = True #@param {type:"boolean"}
 
-model = model.eval() 
-device = CUDA(0) if is_gpu else "cpu"
-model = model.to(device)
+    for idx, image_path in enumerate(image_path_list):
+        print(f' {idx + 1}/{len(image_path_list)}, generating caption for {os.path.basename(image_path)}')
 
+        image = io.imread(image_path)
+        pil_image = PIL.Image.fromarray(image)
+        image = preprocess(pil_image).unsqueeze(0).to(device)
 
+        with torch.no_grad():
+            prefix = clip_model.encode_image(image).to(device, dtype=torch.float32)
+            prefix = prefix / prefix.norm(2, -1).item()
+            prefix_embed = model.clip_project(prefix).reshape(1, prefix_length, -1)
 
-# if not uploaded:
-#   UPLOADED_FILE = ''
-# elif len(uploaded) == 1:
-#   UPLOADED_FILE = list(uploaded.keys())[0]
-# else:
-#   raise AssertionError('Please upload one image at a time')
+        if use_beam_search:
+            generated_text_prefix = generate_beam(model, tokenizer, embed=prefix_embed)[0]
+        else:
+            generated_text_prefix = generate2(model, tokenizer, embed=prefix_embed)
 
-
-UPLOADED_FILE = os.path.join("Images","COCO_val2014_000000354533.jpg")
-print(UPLOADED_FILE)
-
-
-
-#@title Inference
-use_beam_search = True #@param {type:"boolean"}  
-
-image = io.imread(UPLOADED_FILE)
-pil_image = PIL.Image.fromarray(image)
-#pil_img = Image(filename=UPLOADED_FILE)
-
-image = preprocess(pil_image).unsqueeze(0).to(device)
-with torch.no_grad():
-    prefix = clip_model.encode_image(image).to(device, dtype=torch.float32)
-    prefix = prefix / prefix.norm(2, -1).item()
-    prefix_embed = model.clip_project(prefix).reshape(1, prefix_length, -1)
-if use_beam_search:
-    generated_text_prefix = generate_beam(model, tokenizer, embed=prefix_embed)[0]
-else:
-    generated_text_prefix = generate2(model, tokenizer, embed=prefix_embed)
+        print('\n')
+        print(generated_text_prefix)
 
 
-print('\n')
-print(generated_text_prefix)
+def main(options, args):
+    image_path_list = []
+    if args[0].endswith(".txt"):
+        # read file name from the txt file
+        image_path_list = io_function.read_list_from_txt(args[0])
+    if os.path.isfile(args[0]):
+        image_path_list.append(args[0])
+    elif os.path.isdir(args[0]):
+        # read files name from a folder
+        image_path_list = io_function.get_file_list_by_pattern(args[0], '*.tif')
+    else:
+        raise IOError(f'Cannot recognize the input: {args[0]}')
+
+    generate_image_captions_transformer(image_path_list)
+
+
+
+if __name__ == '__main__':
+    usage = "usage: %prog [options] image_path or image_folder or image_list.txt"
+    parser = OptionParser(usage=usage, version="1.0 2025-7-1")
+    parser.description = 'Introduction: generate image captions  '
+
+    parser.add_option("-s", "--trained_model",
+                      action="store", dest="trained_model",
+                      help="the trained model")
+
+    parser.add_option("-s", "--trained_clip_model",
+                      action="store", dest="trained_clip_model",
+                      help="the trained CLIP model")
+
+
+    (options, args) = parser.parse_args()
+    if len(sys.argv) < 2 or len(args) < 1:
+        parser.print_help()
+        sys.exit(2)
+
+    main(options, args)
 
