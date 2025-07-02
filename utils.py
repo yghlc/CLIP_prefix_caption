@@ -39,7 +39,7 @@ def get_output_name(model_path,clip_mode_path=None,clip_model_type=None, image_l
         img_list_name = io_function.get_name_no_ext(image_list_txt)
         output_name += '-' + img_list_name
 
-    return output_name
+    return output_name+'.json'
 
 
 def get_image_path_list(input, file_extension):
@@ -57,7 +57,7 @@ def get_image_path_list(input, file_extension):
 
     return image_path_list
 
-def load_clip_model(device,model_type='ViT-B/32',trained_model=None, b_with_state_dict=True):
+def load_clip_model(device,model_type='ViT-B/32',trained_model=None, b_with_state_dict=False):
     model, preprocess = clip.load(model_type, device=device)
     # load trained model
     if trained_model is not None:
