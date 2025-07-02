@@ -272,6 +272,7 @@ def generate_image_captions(image_path_list, CLIP_model_type="ViT-B/32", CLIP_mo
     # what is this for?
     use_beam_search = False
 
+    text_prefix_list = []
 
     with torch.no_grad():
         # if type(model) is ClipCaptionE2E:
@@ -292,23 +293,36 @@ def generate_image_captions(image_path_list, CLIP_model_type="ViT-B/32", CLIP_mo
             else:
                 generated_text_prefix = generate2(model, tokenizer, embed=prefix_embed)
 
-            print('\n')
+            # print('\n')
             print(generated_text_prefix)
+            text_prefix_list.append(generated_text_prefix)
+
+    return text_prefix_list
+
+def save_image_captions(image_list, caption_list, save_path):
+    image_caption_dict = {image: caption for image, caption in zip(image_list, caption_list)}
+    io_function.save_dict_to_txt_json(save_path, image_caption_dict)
+    print(f'Saved captions to {save_path}')
 
 def main(options, args):
     image_path_list = []
+
+    file_extension = options.ext if options.ext else '.jpg'
+    output_file = options.output_file if options.output_file else 'image_captions.json'
+
     if args[0].endswith(".txt"):
         # read file name from the txt file
         image_path_list = io_function.read_list_from_txt(args[0])
-    if os.path.isfile(args[0]):
+    elif os.path.isfile(args[0]):
         image_path_list.append(args[0])
     elif os.path.isdir(args[0]):
         # read files name from a folder
-        image_path_list = io_function.get_file_list_by_pattern(args[0], '*.tif')
+        image_path_list = io_function.get_file_list_by_pattern(args[0], f'*{file_extension}')
     else:
         raise IOError(f'Cannot recognize the input: {args[0]}')
 
-    generate_image_captions(image_path_list)
+    sentense_list = generate_image_captions(image_path_list)
+    save_image_captions(image_path_list, sentense_list, output_file)
 
 
 
@@ -321,9 +335,17 @@ if __name__ == '__main__':
                       action="store", dest="trained_model",
                       help="the trained model")
 
-    parser.add_option("-s", "--trained_clip_model",
+    parser.add_option("-c", "--trained_clip_model",
                       action="store", dest="trained_clip_model",
                       help="the trained CLIP model")
+    
+    parser.add_option("-o", "--output_file",
+                      action="store", dest="output_file",
+                      help="the file to save the generated captions, if not set, will save to image_captions.json")
+    
+    parser.add_option("-e", "--image_ext", action="store", dest="ext",
+                      help="the extension of the image files, like .tif or .jpg (don't miss the dot), \
+                      need this when the input is a folder")
 
 
     (options, args) = parser.parse_args()
