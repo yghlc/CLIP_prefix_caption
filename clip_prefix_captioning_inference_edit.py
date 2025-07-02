@@ -22,8 +22,8 @@ from tqdm import tqdm, trange
 import skimage.io as io
 import PIL.Image
 
-sys.path.insert(0, os.path.expanduser('~/codes/PycharmProjects/DeeplabforRS'))
-import basic_src.io_function as io_function
+
+from utils import save_image_captions, parser_options, get_image_path_list, load_clip_model, get_output_name
 
 N = type(None)
 V = np.array
@@ -53,10 +53,10 @@ def get_device(device_id: int) -> D:
 
 CUDA = get_device
 
-model_directory = os.path.expanduser('~/Data/models_deeplearning/CLIP_prefix_caption')
-# save_path = os.path.join(os.path.dirname(current_directory), "pretrained_models")
-# os.makedirs(save_path, exist_ok=True)
-model_path = os.path.join(model_directory, 'conceptual_weights.pt')
+# model_directory = os.path.expanduser('~/Data/models_deeplearning/CLIP_prefix_caption')
+# # save_path = os.path.join(os.path.dirname(current_directory), "pretrained_models")
+# # os.makedirs(save_path, exist_ok=True)
+# model_path = os.path.join(model_directory, 'conceptual_weights.pt')
 # model_path = os.path.join(model_directory, 'coco_weights.pt')
 
 # cannot load this, error in  RuntimeError: Error(s) in loading state_dict for ClipCaptionModel
@@ -249,14 +249,12 @@ def generate2(
 # else:
 #   downloader.download_file("1IdaBtMSvtyzF0ByVaBHtvM0JYSXRExRX", model_path)
 
-def generate_image_captions(image_path_list, CLIP_model_type="ViT-B/32", CLIP_model=None, is_gpu = True):
+def generate_image_captions(image_path_list, model_path, CLIP_model_type="ViT-B/32", CLIP_model=None, is_gpu = True):
 
     device = CUDA(0) if is_gpu else "cpu"
-    clip_model, preprocess = clip.load(CLIP_model_type, device=device, jit=False)
+    # clip_model, preprocess = clip.load(CLIP_model_type, device=device, jit=False)
+    clip_model, preprocess = load_clip_model(device, model_type=CLIP_model_type, trained_model=CLIP_model)
 
-    #TODO: to load trained CLIP model
-    if CLIP_model is not None:
-        pass
 
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
@@ -299,29 +297,29 @@ def generate_image_captions(image_path_list, CLIP_model_type="ViT-B/32", CLIP_mo
 
     return text_prefix_list
 
-def save_image_captions(image_list, caption_list, save_path):
-    image_caption_dict = {image: caption for image, caption in zip(image_list, caption_list)}
-    io_function.save_dict_to_txt_json(save_path, image_caption_dict)
-    print(f'Saved captions to {save_path}')
 
 def main(options, args):
-    image_path_list = []
 
     file_extension = options.ext if options.ext else '.jpg'
-    output_file = options.output_file if options.output_file else 'image_captions.json'
 
-    if args[0].endswith(".txt"):
-        # read file name from the txt file
-        image_path_list = io_function.read_list_from_txt(args[0])
-    elif os.path.isfile(args[0]):
-        image_path_list.append(args[0])
-    elif os.path.isdir(args[0]):
-        # read files name from a folder
-        image_path_list = io_function.get_file_list_by_pattern(args[0], f'*{file_extension}')
+    image_path_list = get_image_path_list(args[0], file_extension)
+
+    if options.trained_model is None:
+        # ~/Data/models_deeplearning/CLIP_prefix_caption/coco_weights.pt
+        model_path = os.path.expanduser('~/Data/models_deeplearning/CLIP_prefix_caption/conceptual_weights.pt')
     else:
-        raise IOError(f'Cannot recognize the input: {args[0]}')
+        model_path = options.trained_model
 
-    sentense_list = generate_image_captions(image_path_list)
+    trained_clip_model =  options.trained_clip_model
+    clip_model_type = options.clip_model_type if options.clip_model_type else 'ViT-B/32'
+
+    if options.output_file is None:
+        output_file = get_output_name(model_path, clip_mode_path=trained_clip_model, clip_model_type=clip_model_type)
+    else:
+        output_file = options.output_file
+
+
+    sentense_list = generate_image_captions(image_path_list, model_path, CLIP_model_type=clip_model_type, CLIP_model=trained_clip_model)
     save_image_captions(image_path_list, sentense_list, output_file)
 
 
@@ -331,21 +329,7 @@ if __name__ == '__main__':
     parser = OptionParser(usage=usage, version="1.0 2025-7-1")
     parser.description = 'Introduction: generate image captions  '
 
-    parser.add_option("-s", "--trained_model",
-                      action="store", dest="trained_model",
-                      help="the trained model")
-
-    parser.add_option("-c", "--trained_clip_model",
-                      action="store", dest="trained_clip_model",
-                      help="the trained CLIP model")
-    
-    parser.add_option("-o", "--output_file",
-                      action="store", dest="output_file",
-                      help="the file to save the generated captions, if not set, will save to image_captions.json")
-    
-    parser.add_option("-e", "--image_ext", action="store", dest="ext",
-                      help="the extension of the image files, like .tif or .jpg (don't miss the dot), \
-                      need this when the input is a folder")
+    parser_options(parser)
 
 
     (options, args) = parser.parse_args()
